@@ -217,22 +217,11 @@ The following table shows adjacent occurrences with the same measurement values:
 
 ```{r, echo=FALSE}
 # The line following counts the adjacent duplicated values in a column
-dup.adj <- sapply(cepagri[,-1], function(x){rle(x)$lengths})
-
-# The next line just create a transposed matrix of unlisted dup.adj  for
-# converting into a data.frame.
-# This is done here just for better data manipulation in the comming lines
-dup.adj <- as.data.frame(t(matrix(unlist(dup.adj), nrow=length(dup.adj))))
-
-# Create the mean of duplicated value in a row for having a comparison
-# parameter for finding the row with all values duplicated
-dup.adj <- apply(dup.adj, 1, function(x){
-    v <-mean(x); v > 1 & v == max(x)
-    }) 
+dup.adj <- sapply(cepagri[,-1], function(x){with(cepagri, c(x[-1]==x[-nrow(cepagri)], TRUE))})
 
 # The following lines are here just for printing
 # duplicated adjacent values as example
-cepagri.dup.adj <- cepagri[dup.adj,]
+cepagri.dup.adj = cepagri[rowSums(dup.adj)==4,]
 if(nrow(cepagri.dup.adj) > 1){
     n <- as.numeric(rownames(cepagri.dup.adj[1,]))
     kable(cepagri[c(as.character(n), as.character(n+1)),])
@@ -240,7 +229,7 @@ if(nrow(cepagri.dup.adj) > 1){
 ```
 
 ```{r, echo=FALSE}
-cepagri <- cepagri[!dup.adj,]
+cepagri = cepagri[rowSums(dup.adj)!=4,]
 ```
 \
 
