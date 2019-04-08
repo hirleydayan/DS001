@@ -1,8 +1,8 @@
 ########### Trabalho 2 - Módulo 2 ###########
-## Individual [   ]          Dupla [   ]    
-## Aluno 1: 
+## Individual [   ]          Dupla [ X ]    
+## Aluno 1: Hirley Dayan Lourenço da Silva
 # 
-## Aluno 2 (deixar em branco caso seja individual): 
+## Aluno 2: Marcia Parmigiani 
 # 
 
 #### Atividade 1 ###############################################################
@@ -32,6 +32,10 @@ colnames(frogs) <- c(
 
 sapply(frogs, class)
 
+frogs <- unique(frogs)
+
+sapply(frogs[,1:22],sd)
+
 autovetores <- get_autovetores(frogs[1:22])
 head(autovetores$x)
 
@@ -42,7 +46,7 @@ head(autovetores$x)
 # Escolha do número de dimensões para redução
 get_numero_dimensoes <- function(autovetores, x) {
     cp <- cumsum(autovetores$sdev^2 / sum(autovetores$sdev^2))
-    autovetores$x[,which(x >= cp)]
+    return(autovetores$x[,which(x >= cp)])
 }
 
 results <- data.frame()
@@ -72,9 +76,9 @@ print(results)
 ###################
 #     #     K     #   
 ###################
-# 90% #           # 
-# 95% #           # 
-# 99% #           #
+# 90% #     8     # 
+# 95% #    11     # 
+# 99% #    16     #
 ###################
 
 #### Atividade 2 ###############################################################
@@ -82,31 +86,59 @@ print(results)
 ##############
 ## Função 1 ##
 ##############
-grafico_pca <- function(base, col = 1, scale = TRUE){
+grafico_pca <- function(base, col = 1, scale = TRUE, texts=FALSE){
     pca <- prcomp(base, scale.=scale)
-    plot(pca$x[,1:2], col=col, xlab="Dimensao 1", ylab="Dimensao 2")
+    if (texts){
+        colors <- rainbow(length(unique(col)))
+        plot(pca$x[,1:2], t='n', main="", xlab="Dimensao 1", ylab="Dimensao 2")
+        text(pca$x[,1:2], labels=col, col=colors[col], cex =0.5)
+    } else {
+        plot(pca$x[,1:2],col=col, xlab="Dimensao 1", ylab="Dimensao 2", pch = 20)
+    }
+    return(pca)
 }
+pca <- grafico_pca(frogs[,1:22], col=frogs$Family)
 
-grafico_pca(frogs[,1:22], col=frogs$Family)
+summary(pca)
 
 ##############
 ## Função 2 ##
 ##############
-grafico_tsne <- function(base, label=1){
+grafico_tsne <- function(base, label=1, texts=FALSE){
     library(readr)
     library(Rtsne)
     set.seed (1)
     tsne <- Rtsne(base, dims = 2, 
-                  perplexity = 30, 
+                  perplexity = 30,   # 5<->50 
                   verbose = TRUE, 
                   max_iter = 500)
-    colors <- rainbow(length(unique(label)))
-    names(colors) <- unique(label)
-    plot(tsne$Y, t='n', main="", xlab="Dimensao 1", ylab="Dimensao 2")
-    text(tsne$Y, labels=label, col=colors[label], cex =0.5)
+    if(texts){
+        colors <- rainbow(length(unique(label)))
+        names(colors) <- unique(label)
+        plot(tsne$Y, t='n', main="", xlab="Dimensao 1", ylab="Dimensao 2")
+        text(tsne$Y, labels=label, col=colors[label], cex =0.5)
+    }else{
+        plot(tsne$Y, col=label, xlab="Dimensao 1", ylab="Dimensao 2", pch = 20)
+    }
+    return(tsne)
 }
 
-grafico_tsne(frogs[,1:22], label=frogs$Family)
+tsne <- grafico_tsne(frogs[,1:22], label=frogs$Family)
+
+# Variances
+pca.var <- apply(tsne$Y, 2, var)
+
+# Cumulative proportions
+cev = cumsum(pca.var) / sum(pca.var)
+cev
 
 ### Melhor projeção:
-### Motivo:
+### Motivo: O t-SNE apresentou um melhor resultado por ser muito indicado para 
+#           dados não lineares. Adicionalmente, para dados "well-clustered" [1] 
+#           de grandes dimensoes, o t-SNE tende a produzir um resultado melhor
+#           para representacoes em 2 ou 3 dimensoes.
+
+### Referencias:
+# [1] Kobak, Dmitry & Berens, Philipp. (2018). The art of using t-SNE for 
+#     single-cell transcriptomics. 10.1101/453449. 
+# [2] How to Use t-SNE Effectively, https://distill.pub/2016/misread-tsne/
