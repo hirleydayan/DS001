@@ -18,7 +18,10 @@ print_info <- function(data_frame) {}
 
 ## Item 3
 # Relações entre Características
-print_relacao <- function(data_frame) {}
+library(corrplot)
+print_relacao <- function(data_frame) {
+    corrplot(M, method="circle")
+}
 
 ################################################################################
 #### Atividade 2 - base de dados: bakery.csv ###################################
@@ -56,7 +59,7 @@ get_histo_top20 <- function(caminho) {
                                       sep=",", 
                                       rm.duplicates = TRUE)
     itemFrequencyPlot(transacoes , topN=20, type="absolute")
-    sin
+    sink()
     return(transacoes)
 }
 #
