@@ -2,7 +2,7 @@
 ## Individual [   ]          Dupla [ X ]    
 ## Aluno 1: Hirley Dayan Lourenço da Silva
 # 
-## Aluno 2: Marcia Parmigiani 
+## Aluno 2: Marcia Maria Parmigiani Martins
 # 
 
 #### Atividade 1 ###############################################################
