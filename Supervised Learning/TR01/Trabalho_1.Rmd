@@ -1,0 +1,126 @@
+---
+title: "House Pricing"
+author: "Hirley Dayan Lourenço da Silva"
+date: "4/9/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Dataset Loading
+
+```{r "Data Loading"}
+f.training   <- "housePricing_trainSet.csv"
+f.validation <- "housePricing_valSet.csv"
+
+ds.training   <- read.csv(f.training)
+ds.validation <- read.csv(f.validation)
+```
+
+## Data Analysis
+
+There are **`r nrow(ds.training)`** samples in the traning dataset and 
+**`r nrow(ds.validation)`** samples in the validation dataset. 
+
+The validation dataset represents 
+**`r round(nrow(ds.validation)/(nrow(ds.training)+nrow(ds.validation))*100, 2)`%**
+of the total available data (both training and validation datasets).
+
+- Training dataset **`r f.training`**:
+```{r "Training Dataset"}
+head(ds.training, 4)
+```
+
+- Validation dataset **`r f.validation`**:
+```{r "Validation Dataset"}
+head(ds.validation, 4)
+```
+
+The available features and its data types are listed following. There is only 
+one categorical feature in both training and validation datasets that contains 
+the house proximity to the ocean (`ocean_proximity`). In the case of linear 
+regression, categorical features must not be used. In that sense, 
+for this study, categorical features will be excluded.
+
+- Training dataset **`r f.training`**:
+```{r "Training Dataset Feature Classes"}
+sapply(ds.training, class)
+```
+
+- Validation dataset **`r f.validation`**:
+```{r "Validation Dataset Feature Classes"}
+sapply(ds.validation, class)
+```
+
+Both training and validation datasets contains 
+**`r nrow(ds.training[!complete.cases(ds.training),])`** and 
+**`r nrow(ds.validation[!complete.cases(ds.validation),])`** inclomplete 
+entries, respectivelly, and some samples are listed following. 
+<font color="red">How to deal with missing data? Shall remove the lines or extrapolate?</font>
+
+- Incomplete samples in the training dataset **`r f.training`**:
+```{r "Incomplete Training Samples"}
+head(ds.training[!complete.cases(ds.training),], 4)
+```
+
+- Incomplete samples in the Validation dataset **`r f.validation`**:
+```{r "Incomplete Validation Samples"}
+head(ds.validation[!complete.cases(ds.validation),], 4)
+```
+
+## Data Cleaning After Validation
+
+Removal of categorical features:
+
+- Training dataset **`r f.training`**:
+```{r "Training Datasets Cleaning"}
+ds.training <- ds.training[,-which(names(ds.training) %in% c("ocean_proximity"))]
+head(ds.training, 4)
+```
+
+
+- Validation dataset **`r f.validation`**:
+```{r "Validation Datasets Cleaning"}
+ds.validation <- ds.validation[,-which(names(ds.validation) %in% c("ocean_proximity"))]
+head(ds.validation, 4)
+```
+
+<font color="red">How to deal with missing data? Shall remove the lines or extrapolate?</font>
+
+
+## Data Normalization
+
+Data normalization using **z-score**:
+
+- Training dataset **`r f.training`**:
+```{r "Training Datasets Normalization"}
+ds.training <-  as.data.frame(scale(ds.training, center = TRUE, scale = TRUE))
+head(ds.training, 4)
+```
+
+- Validation dataset **`r f.validation`**:
+```{r "Validation Datasets Normalization"}
+ds.validation <-  as.data.frame(scale(ds.validation, center = TRUE, scale = TRUE))
+head(ds.validation, 4)
+```
+
+## Linear Regression
+
+```{r}
+model <- paste(names(ds.training), collapse = '+')
+model_formula <- as.formula(paste("median_house_value ~ ", model))
+lm(model_formula, data = ds.training)
+```
+
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r pressure, echo=FALSE}
+plot(pressure)
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.

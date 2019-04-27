@@ -1,0 +1,629 @@
+---
+title: Wine Quality Analysis
+
+# Use letters for affiliations
+author:
+  - name: Hirley Dayan Lourenço da Silva *and* Marcia Maria Parmigiani Martins
+    affiliation:
+# address:
+#  - code: A
+#    address: Institute of Smoke and Magic, University of Sometown, Sometown, XY, 12345
+#  - code: A
+#    address: Department of Neat Tricks, Whereever State University, Someplace, MC, 67890
+    
+# Optional: line of arbitrary text with additional information.
+# Could be used, for example, to mention the bibliographic info in a post-print.
+# If not specified, defaults to "This version was compiled on \today"
+date_subtitle: "Unicamp Data Science - Supervised Learning Module "
+
+# For footer text  TODO(fold into template, allow free form two-authors)
+# lead_author_surname: Author and Author
+
+# Place eg a DOI URL or CRAN Package URL here
+# doi_footer: "https://cran.r-project.org/package=YourPackage"
+
+# Abstract
+abstract: |
+  Logistic regression is used to describe data and to explain the relationship 
+  between one dependent binary variable and one or more independent variables. 
+  This work explores Logistic Regression techniques for creating a model for 
+  classifying the quality of wines based on a few chemical features. 
+
+# Optional: Acknowledgements
+# acknowledgements: |
+#  This template package builds upon, and extends, the work of the excellent
+#  [rticles](https://cran.r-project.org/package=rticles) package, and both packages rely on the
+#  [PNAS LaTeX](http://www.pnas.org/site/authors/latex.xhtml) macros. Both these sources are
+#  gratefully acknowledged as this work would not have been possible without them.  Our extensions
+#  are under the same respective licensing term
+#  ([GPL-3](https://www.gnu.org/licenses/gpl-3.0.en.html) and
+#  [LPPL (>= 1.3)](https://www.latex-project.org/lppl/)).
+
+# Optional: One or more keywords
+keywords:
+  - Logistic Regression
+  - glm
+  - glmnet
+
+# Paper size for the document, values of letterpaper and a4paper
+papersize: a4paper
+
+# Font size of the document, values of 9pt (default), 10pt, 11pt and 12pt
+fontsize: 9pt
+
+# Optional: Force one-column layout, default is two-column
+#one_column: true
+
+# Optional: Enables lineno mode, but only if one_column mode is also true
+#lineno: true
+
+# Optional: Enable one-sided layout, default is two-sided
+#one_sided: true
+
+# Optional: Enable section numbering, default is unnumbered
+#numbersections: true
+
+# Optional: Specify the depth of section number, default is 5
+#secnumdepth: 5
+
+# Optional: Skip inserting final break between acknowledgements, default is false
+skip_final_break: true
+
+# Optional: Bibliography 
+bibliography: bibliography
+
+# Optional: Enable a 'Draft' watermark on the document
+# watermark: true
+
+# Customize footer, eg by referencing the vignette
+# footer_contents: "YourPackage Vignette"
+
+# Produce a pinp document
+output: pinp::pinp
+
+# Required: Vignette metadata for inclusion in a package.
+vignette: >
+  %\VignetteIndexEntry{YourPackage-vignetteentry}
+  %\VignetteKeywords{YourPackage, r, anotherkeyword}
+  %\VignettePackage{YourPackage}
+  %\VignetteEngine{knitr::rmarkdown}
+---
+
+```{r Setup, include=FALSE, message=FALSE}
+library("knitLatex")  #https://github.com/cran/knitLatex
+
+f_normalize <- function(ds){
+    f <- function(x){(x-min(x))/(max(x)-min(x))}   
+    ds <- as.data.frame(sapply(ds, f))
+    return(ds)
+}
+
+f_boxplot <- function(ds){
+    library("ggplot2")
+    ds.stack <- stack(ds)
+    names(ds.stack)<-c("Values", "Features")
+    p <- ggplot(ds.stack, aes(x = Features, y = Values, fill = Features)) + 
+        geom_boxplot() + theme_minimal() + 
+        theme(legend.position = "none", 
+              axis.text.x = element_text(angle = 90, hjust = 1),
+              axis.title.x=element_blank(),
+              axis.title.y=element_blank())
+    return(p)
+}
+
+f_cap <- function(ds){
+    # Calculate IQR
+    ds.iqr <- sapply(ds, IQR)
+    ds.quantiles <- 
+        as.data.frame(sapply(ds, 
+                             function(x){quantile(x, c(0.05,0.25,0.75,0.95))}))
+    
+    # Calculate upper and lower limits
+    ds.limits <- rbind(
+        "lower" = ds.quantiles['25%',] - 1.5 * ds.iqr, 
+        "upper" = ds.quantiles['75%',] + 1.5 * ds.iqr
+    )
+    # Replace outliers using capping method, by replacing values below 5th 
+    # percentile and above 95th percentile by both lower and upper limits, 
+    # respectively, where:
+    # lower = Q1 - 1.5*IQR
+    # upper = Q1 - 1.5*IQR
+    for(n in names(ds)){
+        ds[!is.na(ds[, n]) & 
+                   ds[, n] < ds.limits["lower", n], n] <- 
+            ds.quantiles["5%", n]
+        ds[!is.na(ds[, n]) & 
+                   ds[, n] > ds.limits["upper", n], n] <- 
+            ds.quantiles["95%", n]
+    }
+    return(ds)
+}
+
+f_smote <- function(ds, class, formula, perc.over=100, perc.under=200, k=2){
+    library("DMwR")
+    set.seed(1)
+    ds[,class] <- as.factor(ds[,class])
+    ds <- SMOTE(formula, ds, 
+                perc.over = perc.over,  
+                perc.under = perc.under, 
+                k=k)
+    ds$quality <- as.numeric(as.character(ds[,class]))
+    return(ds)
+}
+
+f_logistic <- function(ds.train, ds.test, cls, formula, 
+                       family = binomial(link="logit"), 
+                       predict.threshold=0.5){
+    library("caret")
+    library("pROC")
+    
+    set.seed(1)
+    
+    model <- glm(formula, ds.train, family=family)
+    Y.test <- ds.test[, cls]
+    Y_hat.test <- predict(model, ds.test, type="response")
+    Y_hat.test[Y_hat.test >= predict.threshold] <- 1
+    Y_hat.test[Y_hat.test < predict.threshold] <- 0
+    cm <- confusionMatrix(data = as.factor(Y_hat.test), 
+                          reference = as.factor(Y.test), 
+                          positive='1')
+    roc <- roc(Y.test, Y_hat.test, direction="<")
+    
+    r <- list()
+    r$Y.test <- Y.test
+    r$Y_hat.test <- Y_hat.test
+    r$cm <- cm
+    r$roc <- roc
+    r$model <- model
+    return(r)
+}
+
+f_logistic2 <- function(ds.train, ds.test, cls, formula, 
+                       family = "binomial", 
+                       alpha=0, lambda=1,
+                       predict.threshold=0.5){
+    library("glmnet")
+    library("caret") 
+    library("pROC")
+    
+    set.seed(1)
+    
+    Y.train <- ds.train[, cls]
+    X.train <- model.matrix(formula, ds.train)
+    Y.test <- ds.test[, cls]
+    X.test <- model.matrix(formula, ds.test)
+    
+    model <- glmnet(X.train, Y.train, 
+                    family=family, alpha=alpha, lambda = lambda)
+    
+    Y_hat.test <- as.numeric(predict(model, newx = X.test, type="response"))
+    
+    Y_hat.test[Y_hat.test >= predict.threshold] <- 1
+    Y_hat.test[Y_hat.test < predict.threshold] <- 0
+    cm <- confusionMatrix(data = as.factor(Y_hat.test), 
+                          reference = as.factor(Y.test), 
+                          positive='1')
+    
+    roc <- roc(Y.test, Y_hat.test, direction="<")
+    
+    r <- list()
+    r$Y.test <- Y.test
+    r$Y_hat.test <- Y_hat.test
+    r$cm <- cm
+    r$roc <- roc
+    r$model <- model
+    return(r)
+}
+```
+
+
+## Introduction 
+
+This report contains an analysis of **WineQuality** datasets, using a machine 
+learning pipeline for exploring the datasets and proposing a logistic 
+classifier model for identifying good and bad wines based on a few 
+features.
+
+\begin{figure}[h]
+  \begin{center}
+    \includegraphics[width=0.45\textwidth, height=2.5in]{pipeline} 
+  \caption{Machine Learning Pipeline}\label{fig}
+  \end{center}
+\end{figure}
+
+## Data Preparation
+
+```{r DataLoading, echo=FALSE}
+# Data Loading
+fl.tra <- "wineQuality_train.data.txt"
+fl.val <- "wineQuality_val.data.txt"
+fl.tst <- "wineQuality_test.data.txt"
+ds.tra <- read.csv(fl.tra)
+ds.val <- read.csv(fl.val)
+ds.tst <- read.csv(fl.tst)
+```
+
+There are **`r nrow(ds.tra)`** samples in the **training** dataset and 
+**`r nrow(ds.val)`** samples in the **validation** dataset. 
+The **validation** dataset represents 
+**`r round(nrow(ds.val)/(nrow(ds.tra)+nrow(ds.val))*100, 2)`%**
+of the total available data (both **training** and **validation** datasets).
+The **testing** dataset contains **`r nrow(ds.tst)`** samples.
+A few samples of the **training** dataset is shown in the 
+**Table \ref{tab:TrainingDataset}**.
+
+```{r TrainingDataset, echo=FALSE, results='asis'}
+xTab(formatC(t(head(ds.tra, 6)), format='f', digits=2), 
+     rows=TRUE, coldef = 'r|rrrrrr', 
+     caption.bottom="\\label{tab:TrainingDataset}Training dataset")
+```
+
+```{r IncompleteCasesAnalysis, echo=FALSE}
+ds.tra.nrows <- nrow(ds.tra[!complete.cases(ds.tra),])
+ds.val.nrows <- nrow(ds.val[!complete.cases(ds.val),])
+ds.tst.nrows <- nrow(ds.tst[!complete.cases(ds.tst),])
+if (ds.tra.nrows==0 && ds.val.nrows==0 && ds.tst.nrows == 0){
+    no_incomplete_cases <- TRUE
+}
+```
+
+**Training**, **validation** and **test** datasets contains the following 
+number of incomplete samples:
+
+- **Training**: **`r ds.tra.nrows`** incomplete samples
+- **Validation**: **`r ds.val.nrows`** incomplete samples
+- **Testing**: **`r ds.val.nrows`** incomplete samples
+
+```{r NoIncompleteCases, echo=FALSE, results='asis', eval=no_incomplete_cases}
+cat("
+As shown above, there are **no** incomplete cases in the **training**, 
+**validation** and **testing** datasets.
+")
+```
+
+```{r SummaryBeforeNormalization, echo=FALSE, results='asis'}
+xTab(formatC(t(sapply(ds.tra, summary)), format='f', digits=2), 
+      rows=TRUE, caption.bottom="\\label{tab:SummaryBeforeNormalization}Training dataset overview (without normalization)")
+```
+
+**Table \ref{tab:SummaryBeforeNormalization}** and 
+**Table \ref{tab:SummaryAfterNormalization}**
+present an overview of the **training** dataset before and after normalization.
+For normalizing the datasets it was used the **min**-**max** normalization, as 
+follows:
+
+\begin{gather}
+x'=\frac{x-min(x)}{max(x)-min(x)}
+\end{gather}
+
+```{r NormalizationForDistributionAnalysis, echo=FALSE, echo=FALSE}
+ds.tra.norm <- ds.tra
+ds.tra.norm[,1:11] <- f_normalize(ds.tra.norm[,1:11])
+
+ds.val.norm <- ds.val
+ds.val.norm[,1:11] <- f_normalize(ds.val.norm[,1:11])
+
+ds.tst.norm <- ds.tst
+ds.tst.norm[,1:11] <- f_normalize(ds.tst.norm[,1:11])
+```
+
+```{r SummaryAfterNormalization, echo=FALSE, results='asis'}
+xTab(formatC(t(sapply(ds.tra.norm, summary)), format='f', digits=2), 
+     rows=TRUE, caption.bottom="\\label{tab:SummaryAfterNormalization}Training dataset overview (normalized)")
+```
+
+The box plot in the **Figure \ref{fig:DistribuitionAnalysis}** gives a good 
+overview of the data distribution of the **training** dataset before the 
+removal of the outliers.
+For the removal of the outliers, which are values that differ considerably from 
+the majority of a set of data, different techniques are available. 
+In this study, outlier removal was performed using the *capping* technique,by 
+replacing values outside the $1.5*IQR$ limits, with 
+the lower limit replaced by the **5th** percentile and the bigger limit replaced 
+by the **95th** percentile.
+
+```{r DistribuitionAnalysis, echo=FALSE, fig.cap="Data distribuition analysis"}
+print(f_boxplot(ds.tra.norm[,1:11]))
+```
+
+The lower and upper limits are calculated by the equations:
+\begin{gather}
+IQR = Q3 - Q1 \\ 
+Lower = Q1 - 1.5 * IQR \\ 
+Upper = Q3 + 1.5 * IQR
+\end{gather}
+
+Once the limits are calculated, outliers below the **5th** percentile and above 
+the **95th** percentile are replaced by both ***Lower*** and ***Upper*** limits, 
+respectively.  
+
+```{r OutliersCapping, echo=FALSE}
+ds.tra[,1:11] <- f_cap(ds.tra[,1:11])
+ds.val[,1:11] <- f_cap(ds.val[,1:11])
+# ds.tst[,1:11] <- f_cap(ds.tst[,1:11])
+```
+
+```{r NormalizationAfterOutlierCleanup, echo=FALSE}
+ds.tra.norm <- ds.tra
+ds.tra.norm[,1:11] <- f_normalize(ds.tra.norm[,1:11])
+
+ds.val.norm <- ds.val
+ds.val.norm[,1:11] <- f_normalize(ds.val.norm[,1:11])
+
+ds.tst.norm <- ds.tst
+ds.tst.norm[,1:11] <- f_normalize(ds.tst.norm[,1:11])
+```
+
+After the **capping** of the outliers, the new data distribution is shown 
+in **Figure \ref{fig:DistributionAnalysis2}**.
+
+```{r DistributionAnalysis2, echo=FALSE, echo=FALSE, fig.cap="Data distribuition analysis after capping"}
+print(f_boxplot(ds.tra.norm[,1:11]))
+```
+
+According to the quality, the datasets are balanced as follows:
+
+```{r ImbalanceAnalysis, echo=FALSE}
+ds.tra.gw.perc <- 
+    round(nrow(ds.tra.norm[ds.tra.norm$quality==1,])*100/nrow(ds.tra.norm),2)
+ds.val.gw.perc <- 
+    round(nrow(ds.val.norm[ds.val$quality==1,])*100/nrow(ds.val.norm),2)
+ds.tst.gw.perc <- 
+    round(nrow(ds.tst.norm[ds.tst$quality==1,])*100/nrow(ds.tst.norm),2)
+```
+
+- **Tranining**: **`r paste0(ds.tra.gw.perc,"%")`** of good wine samples
+- **Validation**: **`r paste0(ds.val.gw.perc,"%")`** of good wine samples
+- **Test**: **`r paste0(ds.tst.gw.perc,"%")`** of good wine samples
+
+## Model Training, Deployment and Evaluation
+
+```{r Formulas, echo=FALSE, message=FALSE}
+f1 <- formula(quality ~ .)
+
+f2 <- formula( quality ~ fixed.acidity + volatile.acidity + citric.acid +
+                   residual.sugar + chlorides + free.sulfur.dioxide +
+                   total.sulfur.dioxide + density + pH + sulphates + alcohol + 
+                   I(fixed.acidity ^ 2) + I(volatile.acidity ^ 2) + 
+                   I(citric.acid ^ 2) + I(residual.sugar ^ 2) + I(chlorides ^ 2) + 
+                   I(free.sulfur.dioxide ^ 2) + I(total.sulfur.dioxide ^ 2) + 
+                   I(density ^ 2) + I(pH ^ 2) + I(sulphates ^ 2) + I(alcohol ^ 2))
+
+f3 <- formula( quality ~ fixed.acidity + volatile.acidity + citric.acid +
+                   residual.sugar + chlorides + free.sulfur.dioxide +
+                   total.sulfur.dioxide + density + pH + sulphates + alcohol + 
+                   I(fixed.acidity ^ 2) + I(volatile.acidity ^ 2) + 
+                   I(citric.acid ^ 2) + I(residual.sugar ^ 2) + I(chlorides ^ 2) + 
+                   I(free.sulfur.dioxide ^ 2) + I(total.sulfur.dioxide ^ 2) + 
+                   I(density ^ 2) + I(pH ^ 2) + I(sulphates ^ 2) + I(alcohol ^ 2) +
+                   I(fixed.acidity ^ 3) + I(volatile.acidity ^ 3) + 
+                   I(citric.acid ^ 3) + I(residual.sugar ^ 3) + I(chlorides ^ 3) + 
+                   I(free.sulfur.dioxide ^ 3) + I(total.sulfur.dioxide ^ 3) + 
+                   I(density ^ 3) + I(pH ^ 3) + I(sulphates ^ 3) + I(alcohol ^ 3))
+
+f4 <- formula( quality ~ fixed.acidity + volatile.acidity + citric.acid +
+                   residual.sugar + chlorides + free.sulfur.dioxide +
+                   total.sulfur.dioxide + density + pH + sulphates + alcohol + 
+                   I(fixed.acidity ^ 2) + I(volatile.acidity ^ 2) + 
+                   I(citric.acid ^ 2) + I(residual.sugar ^ 2) + I(chlorides ^ 2) + 
+                   I(free.sulfur.dioxide ^ 2) + I(total.sulfur.dioxide ^ 2) + 
+                   I(density ^ 2) + I(pH ^ 2) + I(sulphates ^ 2) + 
+                   I(alcohol ^ 2) + I(fixed.acidity ^ 3) + I(volatile.acidity ^ 3) + 
+                   I(citric.acid ^ 3) + I(residual.sugar ^ 3) + I(chlorides ^ 3) + 
+                   I(free.sulfur.dioxide ^ 3) + I(total.sulfur.dioxide ^ 3) + 
+                   I(density ^ 3) + I(pH ^ 3) + I(sulphates ^ 3) + I(alcohol ^ 3) +
+                   I(fixed.acidity ^ 4) + I(volatile.acidity ^ 4) + 
+                   I(citric.acid ^ 4) + I(residual.sugar ^ 4) + I(chlorides ^ 4) + 
+                   I(free.sulfur.dioxide ^ 4) + I(total.sulfur.dioxide ^ 4) + 
+                   I(density ^ 4) + I(pH ^ 4) + I(sulphates ^ 4) + I(alcohol ^ 4)   
+               )
+
+formulas <- c(f1, f2, f3)
+```
+For training the model, quadratic and cubic functions were created with 
+the dataset features. Additionally, the ***SMOTE*** technique was used 
+for dealing with the imbalanced datasets.
+
+```{r "LogisticModel1", echo=FALSE, message=FALSE, warning=FALSE}
+predict.threshold = 0.6
+
+perc <- list(c(100,100), 
+             c(100,150), 
+             c(100,200),
+             c(100,500))
+
+quality_filter = "BACC"
+min_quality_filter = 0.65
+
+cross_analysis <- data.frame()
+for(f_i in 1:length(formulas)){
+    for(p_i in 1:length(perc)){
+        ds.tra.norm.smote <- f_smote(ds.tra.norm, "quality",  
+                                     formulas[[f_i]],
+                                     perc.over = perc[[p_i]][1], 
+                                     perc.under = perc[[p_i]][2], 
+                                     k=2)
+        ds.tra.norm.gw.perc <- 
+            round(nrow(ds.tra.norm.smote[ds.tra.norm.smote$quality==1,])*100/
+                      nrow(ds.tra.norm.smote),2)
+        
+        result <- f_logistic(ds.tra.norm.smote, ds.val.norm, "quality", 
+                             formulas[[f_i]], 
+                             predict.threshold = predict.threshold)
+        roc <- result$roc
+        cm <- result$cm
+        t <- data.frame()
+        t[1,"Formula"] <- f_i
+        t[1,"BACC"] <- 
+            formatC(cm$byClass["Balanced Accuracy"], format='f', digits=4)
+        t[1,"F1"] <- formatC(cm$byClass["F1"], format='f', digits=4)
+        t[1,"Good Wine Perc"] <- 
+            formatC(ds.tra.norm.gw.perc, format='f', digits=2)
+        
+        if (t[1, quality_filter] >= min_quality_filter){
+            cross_analysis <- rbind(cross_analysis, t[1,])
+            assign(paste0("f", nrow(cross_analysis), "_model"),
+                       result$model, envir = .GlobalEnv)
+        }
+    }
+}
+model.quality <- cross_analysis[, quality_filter]
+best <- cross_analysis[model.quality==max(model.quality),]
+model.var.name <- paste0("f", as.integer(as.numeric(rownames(best))), "_model")
+model.best <- get(model.var.name)
+formula.best <- get(paste0("f", best$Formula))
+```
+
+```{r CrossAnalysis, echo=FALSE, results='asis'}
+rs <- rep("r", (ncol(cross_analysis) - 1))
+rs <- paste0('r|', paste0(rs,collapse=""), collapse="")
+xTab(cross_analysis, rows=FALSE, 
+     coldef = rs,
+     caption.bottom="\\label{tab:CrossAnalysis}Cross analysis matrix (without penalty terms)")
+```
+
+For fitting the model, the **`glm`** function was used for tuning the 
+predefined functions, with the **training** dataset re-balancing during validation. 
+The result of the analysis can be found in **Table \ref{tab:CrossAnalysis}**. 
+The **confusion matrix** of the predicted wine quality against the 
+actual classification, when using the **testing** dataset, can be found in the 
+**Table \ref{tab:ConfusionMatrix}**. 
+The performance during the tests is also shown by the **ROC** 
+curve in **Figure \ref{fig:ROC1}**.
+
+```{r TestVerification, echo=FALSE, message=FALSE, warning=FALSE}
+Y <- ds.tst.norm[, "quality"]
+Y_hat.pred <- predict(model.best, ds.tst.norm[, 1:11], type="response")
+Y_hat <- Y_hat.pred
+Y_hat[Y_hat >= 0.5] <- 1
+Y_hat[Y_hat < 0.5] <- 0
+cm <- confusionMatrix(data = as.factor(Y_hat), 
+                      reference = as.factor(Y), 
+                      positive='1')
+roc <- roc(Y, Y_hat.pred, direction="<")
+```
+
+```{r ConfusionMatrix, echo=FALSE, results='asis'}
+xTab(as.matrix(cm), rows=TRUE, 
+     caption.bottom="\\label{tab:ConfusionMatrix}Confusion matrix (without penalty terms)")
+```
+
+```{r ROC1, echo=FALSE, fig.cap="ROC (without penalty terms)"}
+plot(roc, col="blue", lwd=2)
+```
+
+```{r "LogisticModel2", echo=FALSE, message=FALSE, warning=FALSE}
+predict.threshold = 0.6
+
+perc <- list(c(100,100), 
+             c(100,150), 
+             c(100,200),
+             c(100,500))
+
+alpha <- c(0)
+lambda <- c(0, 1e-07, 1e-06, 1e-05, 1e-04, 1e-03, 1e-02, 0.1, 1, 10)
+
+quality_filter = "BACC"
+min_quality_filter = 0.70
+
+cross_analysis <- data.frame()
+for(f_i in 1:length(formulas)){
+    for(p_i in 1:length(perc)){
+        for(l in lambda){
+            for(a in alpha){
+                ds.tra.norm.smote <- f_smote(ds.tra.norm, "quality",  
+                                             formulas[[f_i]],
+                                             perc.over = perc[[p_i]][1], 
+                                             perc.under = perc[[p_i]][2], 
+                                             k=2)
+                ds.tra.norm.gw.perc <- 
+                    round(nrow(ds.tra.norm.smote[ds.tra.norm.smote$quality==1,])*100/
+                              nrow(ds.tra.norm.smote),2)
+                
+                result <- f_logistic2(ds.tra.norm.smote, ds.val.norm, "quality", 
+                                      formulas[[f_i]], alpha = a, lambda=l,
+                                      predict.threshold = predict.threshold)
+                roc <- result$roc
+                cm <- result$cm
+                t <- data.frame()
+                t[1,"Formula"] <- f_i
+                t[1,"Alpha"] <- a
+                t[1,"Lambda"] <- formatC(l, format='f', digits=1)
+                t[1,"BACC"] <- 
+                    formatC(cm$byClass["Balanced Accuracy"], format='f', digits=4)
+                t[1,"F1"] <- formatC(cm$byClass["F1"], format='f', digits=4)
+                t[1,"Good Wine Perc"] <- 
+                    formatC(ds.tra.norm.gw.perc, format='f', digits=2)
+                
+                if (t[1,quality_filter] >= min_quality_filter){
+                    cross_analysis <- rbind(cross_analysis, t[1,])
+                    
+                    assign(paste0("f", nrow(cross_analysis), "_model"),
+                           result$model, envir = .GlobalEnv)
+                }
+            }
+        }
+    }
+}
+model.quality <- cross_analysis[,quality_filter]
+best <- cross_analysis[model.quality==max(model.quality),]
+model.var.name <- paste0("f", as.integer(as.numeric(rownames(best))), "_model")
+model.best <- get(model.var.name)
+formula.best <- get(paste0("f", best$Formula))
+```
+
+The function **`glmnet`** was also used for fitting the model, and during the 
+evaluation of the quadratic and cubic functions, penalties were applied by 
+changing the value of **`lambda`** parameter.
+Similarly to the previous model fitting by **`glm`**, the **training** dataset 
+was also re-balanced during the training. The result 
+of that analysis can be found in **Table \ref{tab:CrossAnalysis2}**.
+For avoiding spending space in this report, the **Table \ref{tab:CrossAnalysis2}**
+does not bring all collected values in the training. Only the values with 
+**Balanced Accuracy (BACC)** bigger than **70%** are shown. 
+The **confusion matrix** for the predicted wine quality against the actual quality,
+in the the **testing** dataset, can be found in **Table \ref{tab:ConfusionMatrix2}**. 
+The performance during the tests of the classifier is also shown by the **ROC** 
+curve in **Figure \ref{fig:ROC2}**.
+
+```{r CrossAnalysis2, echo=FALSE, results='asis'}
+rs <- rep("r", (ncol(cross_analysis) - 1))
+rs <- paste0('r|', paste0(rs,collapse=""), collapse="")
+xTab(cross_analysis, rows=FALSE, 
+     coldef = rs,
+     caption.bottom="\\label{tab:CrossAnalysis2}Cross analysis matrix (with penalty terms)")
+```
+
+```{r TestVerification2, echo=FALSE, message=FALSE, warning=FALSE}
+model <- model.best
+predict.threshold = 0.6
+formula <- formula.best
+
+Y.tst <- ds.tst.norm[, "quality"]
+X.tst <- model.matrix(formula, ds.tst.norm)
+    
+Y_hat.prec <- predict(model, newx = X.tst, type="response")
+Y_hat.tst <- Y_hat.prec
+    
+Y_hat.tst[Y_hat.tst >= predict.threshold] <- 1
+Y_hat.tst[Y_hat.tst < predict.threshold] <- 0
+
+cm <- confusionMatrix(data = as.factor(Y_hat.tst), 
+                      reference = as.factor(Y.tst), 
+                      positive='1')
+roc <- roc(Y.tst, Y_hat.prec, direction="<")
+```
+
+```{r ConfusionMatrix2, echo=FALSE, results='asis'}
+xTab(as.matrix(cm), rows=TRUE, 
+     caption.bottom="\\label{tab:ConfusionMatrix2}Confision matrix (with penalty terms)")
+```
+
+```{r ROC2, echo=FALSE, fig.cap="ROC (with penalty terms)"}
+plot(roc, col="blue", lwd=2)
+```
+
+## Final Conclusions
+
+The logistic regression classifier with a generalized linear model with penalization, by means of the function **`glmnet`**, has big potential for bringing good results due to its fine-tuning parameters. Despite all the potentials of the **`glmnet`**, this study showed that the **`glm`** classifier performs well, giving almost similar results as the **`glmnet`** classifier. The dataset features were not enough for creating a good classifier, in both cases evaluated, and the addition of 3rd-degree components was necessary to increase the performance during training and validation. Additionally, the tuning of the classifier with a different proportion of wine classes showed that a better performance can be achieved by having more good wine samples in the training dataset.
+

@@ -1,0 +1,359 @@
+---
+title: "House Pricing"
+author: "Hirley Dayan Louren?o da Silva e Marcia Maria Parmigiani Martins"
+output:
+  pdf_document: default
+  html_document:
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning=FALSE, message=FALSE)
+knitr::kable
+library(knitr)
+options(digits=2)
+options(scipen = 999)
+```
+```{r echo=FALSE}
+#############################
+#### Define MAE function ####
+getMAE <- function(pred, true){
+  MAE <- sum(abs(pred - true)) / length(pred)
+  return(MAE)
+}
+#############################
+#### Define MSE function ####
+getMSE <- function(pred, true){
+  MSE <- sum((pred - true)**2) / length(pred)
+  return(MSE)
+}
+
+###################################
+#### Define R-squared function ####
+getRSQ <- function(pred, true){
+  rss <- sum((pred - true) ^ 2)
+  tss <- sum((true - mean(true)) ^ 2)
+  RSQ <- 1 - rss/tss
+  return(RSQ)
+}
+```
+
+## Leitura dos Dados
+
+O dataset utilizado nesse trabalho refere-se a dados de im?veis como total de c?modos, idade, etc, o qual foi dividido entre treino, valida??o e teste, com o objetivo de cria??o de um modelo utilizando algoritmo de **Regress?o Linear** para predi??o do pre?o de im?veis.
+
+```{r echo=FALSE}
+# Set seed
+set.seed(42)
+
+# Leitura dos dados
+trainData <- read.csv('housePricing_trainSet.csv', header=TRUE)
+valData <- read.csv('housePricing_valSet.csv', header=TRUE)
+testData <- read.csv('housePricing_testSet.csv', header=TRUE)
+```
+O dataset de treino possui **`r dim(trainData)[1]`** observa??es e **`r dim(trainData)[2]`** features.\
+O dataset de valida??o possui **`r dim(valData)[1]`** observa??es e **`r dim(valData)[2]`** features.\
+O dataset de teste possui **`r dim(testData)[1]`** observa??es e **`r dim(testData)[2]`** features.
+
+## Tratamento dos dados
+
+O dataset possui uma feature categ?rica **ocean_proximity** com 5 n?veis. Considerando que a Regress?o Linear assume que todas as vari?veis independentes s?o num?ricas, iremos utilizar a t?cnica de **hot encoding** para transformar a feature em num?rica, atribuindo valor 1 se o caso se enquadre na determinada categoria. A inclus?o da feature categ?rica possibilitou um resultado melhor para todos os modelos testados.
+
+Al?m disso, foram removidas observa??es de features sem anota??es (NA) nos dados de treino, valida??o e teste.
+
+
+```{r echo=FALSE}
+# Hot encoding da feature categ?rica para avaliar se resultado do modelo melhora
+trainData$lt1_h_ocean <- as.numeric( trainData$ocean_proximity == "<1H OCEAN")
+trainData$inland <- as.numeric( trainData$ocean_proximity == "INLAND")
+trainData$near_bay <- as.numeric( trainData$ocean_proximity == "NEAR BAY")
+trainData$near_ocean <- as.numeric( trainData$ocean_proximity == "NEAR OCEAN")
+trainData$ocean_proximity <- NULL
+
+valData$lt1_h_ocean <- as.numeric( valData$ocean_proximity == "<1H OCEAN")
+valData$inland <- as.numeric( valData$ocean_proximity == "INLAND")
+valData$near_bay <- as.numeric( valData$ocean_proximity == "NEAR BAY")
+valData$near_ocean <- as.numeric( valData$ocean_proximity == "NEAR OCEAN")
+valData$ocean_proximity <- NULL
+
+testData$lt1_h_ocean <- as.numeric( testData$ocean_proximity == "<1H OCEAN")
+testData$inland <- as.numeric( testData$ocean_proximity == "INLAND")
+testData$near_bay <- as.numeric( testData$ocean_proximity == "NEAR BAY")
+testData$near_ocean <- as.numeric( testData$ocean_proximity == "NEAR OCEAN")
+testData$ocean_proximity <- NULL
+
+trainData <- trainData[,c("longitude","latitude","housing_median_age","total_rooms","total_bedrooms","population","households","median_income","lt1_h_ocean","inland","near_bay","near_ocean","median_house_value")]
+valData <- valData[,c("longitude","latitude","housing_median_age","total_rooms","total_bedrooms","population","households","median_income","lt1_h_ocean","inland","near_bay","near_ocean","median_house_value")]
+testData <- testData[,c("longitude","latitude","housing_median_age","total_rooms","total_bedrooms","population","households","median_income","lt1_h_ocean","inland","near_bay","near_ocean","median_house_value")]
+
+trainData <- trainData[complete.cases(trainData),]
+valData <- valData[complete.cases(valData),]
+testData <- testData[complete.cases(testData),]
+
+```
+
+## Normaliza??o dos dados
+
+A t?cnica de normaliza??o aplicada ao dataset ? a **Min-Max** onde os dados s?o dimensionados em um intervalo fixo, normalmente de 0 ? 1. A feature target **median_house_value** n?o foi inclu?da na normaliza??o.
+
+```{r echo=FALSE}
+# Normaliza??o Min/Max
+maxTrainFeatures <- apply(trainData[,1:12], 2, max)
+minTrainFeatures <- apply(trainData[,1:12], 2, min)
+minMaxDiffTrain <- (maxTrainFeatures - minTrainFeatures)
+
+trainData[,1:12] <- sweep(trainData[,1:12], 2, minTrainFeatures, "-")
+trainData[,1:12] <- sweep(trainData[,1:12], 2, minMaxDiffTrain, "/")
+
+valData[,1:12] <- sweep(valData[,1:12], 2, minTrainFeatures, "-")
+valData[,1:12] <- sweep(valData[,1:12], 2, minMaxDiffTrain, "/")
+
+testData[,1:12] <- sweep(testData[,1:12], 2, minTrainFeatures, "-")
+testData[,1:12] <- sweep(testData[,1:12], 2, minMaxDiffTrain, "/")
+
+# Exemplo dos dados normalizados
+kable(trainData[1:5,])
+```
+
+## Regress?o Linear
+
+O algoritmo de **Regress?o Linear** foi utilizado para predizer os pre?os dos im?veis onde a vari?vel que se deseja encontrar ? a **median_house_value** que representa o valor do im?vel baseado em suas features.
+
+As medidas de avalia??o utilizadas foram a **MAE (Mean Absolute Error)** que calcula a m?dia da diferen?a absoluta entre os valores preditos e os observados e o Coeficiente de Determina??o (R2) que indica qu?o bem o modelo consegue se ajustar sobre um conjunto de predi??es e seus valores verdadeiros, podendo variar entre 0 e 1, sendo que 0 indica que o modelo n?o consegue explicar a variabilidade dos dados e 1 indica que as predi??es se ajustam perfeitamente aos dados (modelo explica toda a variabilidade das predi??es) o que indicar? **overfitting**.
+
+## Resultado dos modelos
+
+```{r echo=FALSE}
+# Regress?o Linear (baseline)
+model_simple <- lm(formula = median_house_value ~ .,
+                   data=trainData)
+
+valPred <- predict(model_simple, valData)
+
+# Medidas de Avalia??o para Regress?o
+# MAE
+MAE_simple <- getMAE(valPred, valData$median_house_value)
+
+# MSE
+MSE_simple <- getMSE(valPred, valData$median_house_value)
+
+# R-squared
+RSQ_simple <- getRSQ(valPred, valData$median_house_value)
+```
+
+Avalia??o para o modelo **baseline**: MAE **`r MAE_simple`** e R? **`r RSQ_simple*100`**%.
+
+```{r echo=FALSE}
+# Regress?o Linear (solu??o alternativa baseada em combina??o de features)
+model_complex <- lm(formula = median_house_value ~ housing_median_age +
+                      total_rooms + total_bedrooms + population + households + median_income + 
+                      lt1_h_ocean + inland + near_bay + near_ocean +
+                      housing_median_age:total_rooms + total_bedrooms:population + households:median_income,
+                    data=trainData)
+
+
+valPred <- predict(model_complex, valData)
+
+# Medidas de Avalia??o para Regress?o
+# MAE
+MAE_complex <- getMAE(valPred, valData$median_house_value)
+
+# MSE
+MSE_complex <- getMSE(valPred, valData$median_house_value)
+
+# R-squared
+RSQ_complex <- getRSQ(valPred, valData$median_house_value)
+```
+
+Avalia??o para o modelo **complexo baseado na combina??o de features existentes**: MAE **`r MAE_complex`** e R? **`r RSQ_simple*100`**%.
+
+```{r echo=FALSE}
+# Regress?o Linear (solu??o alternativa baseada em regress?o polinomial)
+f1 <- formula(median_house_value ~ .)
+
+f2 <- formula(median_house_value ~ housing_median_age +
+                total_rooms + total_bedrooms + population + households + median_income + 
+                lt1_h_ocean + inland + near_bay + near_ocean +
+                I(housing_median_age^2) + I(total_rooms^2) + I(total_bedrooms^2) + I(population^2) +
+                I(households^2) + I(median_income^2) + I(lt1_h_ocean^2) + I(inland^2) + I(near_bay^2) +
+                I(near_ocean^2)
+)
+
+f3 <- formula(median_house_value ~  housing_median_age +
+                total_rooms + total_bedrooms + population + households + median_income + 
+                lt1_h_ocean + inland + near_bay + near_ocean +
+                I(housing_median_age^2) + I(total_rooms^2) + I(total_bedrooms^2) + I(population^2) +
+                I(households^2) + I(median_income^2) + I(lt1_h_ocean^2) + I(inland^2) + I(near_bay^2) +
+                I(near_ocean^2) +
+                I(housing_median_age^3) + I(total_rooms^3) + I(total_bedrooms^3) + I(population^3) +
+                I(households^3) + I(median_income^3) + I(lt1_h_ocean^3) + I(inland^3) + I(near_bay^3) +
+                I(near_ocean^3)
+)
+
+f4 <- formula(median_house_value ~ housing_median_age +
+                total_rooms + total_bedrooms + population + households + median_income + 
+                lt1_h_ocean + inland + near_bay + near_ocean +
+                I(housing_median_age^2) + I(total_rooms^2) + I(total_bedrooms^2) + I(population^2) +
+                I(households^2) + I(median_income^2) + I(lt1_h_ocean^2) + I(inland^2) + I(near_bay^2) +
+                I(near_ocean^2) +
+                I(housing_median_age^3) + I(total_rooms^3) + I(total_bedrooms^3) + I(population^3) +
+                I(households^3) + I(median_income^3) + I(lt1_h_ocean^3) + I(inland^3) + I(near_bay^3) +
+                I(near_ocean^3) +
+                I(housing_median_age^4) + I(total_rooms^4) + I(total_bedrooms^4) + I(population^4) +
+                I(households^4) + I(median_income^4) + I(lt1_h_ocean^4) + I(inland^4) + I(near_bay^4) +
+                I(near_ocean^4)
+)
+
+
+f5 <- formula(median_house_value ~ housing_median_age +
+                total_rooms + total_bedrooms + population + households + median_income + 
+                lt1_h_ocean + inland + near_bay + near_ocean +
+                I(housing_median_age^2) + I(total_rooms^2) + I(total_bedrooms^2) + I(population^2) +
+                I(households^2) + I(median_income^2) + I(lt1_h_ocean^2) + I(inland^2) + I(near_bay^2) +
+                I(near_ocean^2) +
+                I(housing_median_age^3) + I(total_rooms^3) + I(total_bedrooms^3) + I(population^3) +
+                I(households^3) + I(median_income^3) + I(lt1_h_ocean^3) + I(inland^3) + I(near_bay^3) +
+                I(near_ocean^3) +
+                I(housing_median_age^4) + I(total_rooms^4) + I(total_bedrooms^4) + I(population^4) +
+                I(households^4) + I(median_income^4) + I(lt1_h_ocean^4) + I(inland^4) + I(near_bay^4) +
+                I(near_ocean^4) +
+                I(housing_median_age^5) + I(total_rooms^5) + I(total_bedrooms^5) + I(population^5) +
+                I(households^5) + I(median_income^5) + I(lt1_h_ocean^5) + I(inland^5) + I(near_bay^5) +
+                I(near_ocean^5)
+)
+
+
+f6 <- formula(median_house_value ~ housing_median_age +
+                total_rooms + total_bedrooms + population + households + median_income + 
+                lt1_h_ocean + inland + near_bay + near_ocean +
+                I(housing_median_age^2) + I(total_rooms^2) + I(total_bedrooms^2) + I(population^2) +
+                I(households^2) + I(median_income^2) + I(lt1_h_ocean^2) + I(inland^2) + I(near_bay^2) +
+                I(near_ocean^2) +
+                I(housing_median_age^3) + I(total_rooms^3) + I(total_bedrooms^3) + I(population^3) +
+                I(households^3) + I(median_income^3) + I(lt1_h_ocean^3) + I(inland^3) + I(near_bay^3) +
+                I(near_ocean^3) +
+                I(housing_median_age^4) + I(total_rooms^4) + I(total_bedrooms^4) + I(population^4) +
+                I(households^4) + I(median_income^4) + I(lt1_h_ocean^4) + I(inland^4) + I(near_bay^4) +
+                I(near_ocean^4) +
+                I(housing_median_age^5) + I(total_rooms^5) + I(total_bedrooms^5) + I(population^5) +
+                I(households^5) + I(median_income^5) + I(lt1_h_ocean^5) + I(inland^5) + I(near_bay^5) +
+                I(near_ocean^5) +
+                I(housing_median_age^6) + I(total_rooms^6) + I(total_bedrooms^6) + I(population^6) +
+                I(households^6) + I(median_income^6) + I(lt1_h_ocean^6) + I(inland^6) + I(near_bay^6) +
+                I(near_ocean^6)
+)
+
+f7 <- formula(median_house_value ~ housing_median_age +
+                total_rooms + total_bedrooms + population + households + median_income + 
+                lt1_h_ocean + inland + near_bay + near_ocean +
+                I(housing_median_age^2) + I(total_rooms^2) + I(total_bedrooms^2) + I(population^2) +
+                I(households^2) + I(median_income^2) + I(lt1_h_ocean^2) + I(inland^2) + I(near_bay^2) +
+                I(near_ocean^2) +
+                I(housing_median_age^3) + I(total_rooms^3) + I(total_bedrooms^3) + I(population^3) +
+                I(households^3) + I(median_income^3) + I(lt1_h_ocean^3) + I(inland^3) + I(near_bay^3) +
+                I(near_ocean^3) +
+                I(housing_median_age^4) + I(total_rooms^4) + I(total_bedrooms^4) + I(population^4) +
+                I(households^4) + I(median_income^4) + I(lt1_h_ocean^4) + I(inland^4) + I(near_bay^4) +
+                I(near_ocean^4) +
+                I(housing_median_age^5) + I(total_rooms^5) + I(total_bedrooms^5) + I(population^5) +
+                I(households^5) + I(median_income^5) + I(lt1_h_ocean^5) + I(inland^5) + I(near_bay^5) +
+                I(near_ocean^5) +
+                I(housing_median_age^6) + I(total_rooms^6) + I(total_bedrooms^6) + I(population^6) +
+                I(households^6) + I(median_income^6) + I(lt1_h_ocean^6) + I(inland^6) + I(near_bay^6) +
+                I(near_ocean^6) + 
+                I(housing_median_age^7) + I(total_rooms^7) + I(total_bedrooms^7) + I(population^7) +
+                I(households^7) + I(median_income^7) + I(lt1_h_ocean^7) + I(inland^7) + I(near_bay^7) +
+                I(near_ocean^7)
+)
+
+f8 <- formula(median_house_value ~ housing_median_age +
+                total_rooms + total_bedrooms + population + households + median_income + 
+                lt1_h_ocean + inland + near_bay + near_ocean +
+                I(housing_median_age^2) + I(total_rooms^2) + I(total_bedrooms^2) + I(population^2) +
+                I(households^2) + I(median_income^2) + I(lt1_h_ocean^2) + I(inland^2) + I(near_bay^2) +
+                I(near_ocean^2) +
+                I(housing_median_age^3) + I(total_rooms^3) + I(total_bedrooms^3) + I(population^3) +
+                I(households^3) + I(median_income^3) + I(lt1_h_ocean^3) + I(inland^3) + I(near_bay^3) +
+                I(near_ocean^3) +
+                I(housing_median_age^4) + I(total_rooms^4) + I(total_bedrooms^4) + I(population^4) +
+                I(households^4) + I(median_income^4) + I(lt1_h_ocean^4) + I(inland^4) + I(near_bay^4) +
+                I(near_ocean^4) +
+                I(housing_median_age^5) + I(total_rooms^5) + I(total_bedrooms^5) + I(population^5) +
+                I(households^5) + I(median_income^5) + I(lt1_h_ocean^5) + I(inland^5) + I(near_bay^5) +
+                I(near_ocean^5) +
+                I(housing_median_age^6) + I(total_rooms^6) + I(total_bedrooms^6) + I(population^6) +
+                I(households^6) + I(median_income^6) + I(lt1_h_ocean^6) + I(inland^6) + I(near_bay^6) +
+                I(near_ocean^6) + 
+                I(housing_median_age^7) + I(total_rooms^7) + I(total_bedrooms^7) + I(population^7) +
+                I(households^7) + I(median_income^7) + I(lt1_h_ocean^7) + I(inland^7) + I(near_bay^7) +
+                I(near_ocean^7) + 
+                I(housing_median_age^8) + I(total_rooms^8) + I(total_bedrooms^8) + I(population^8) +
+                I(households^8) + I(median_income^8) + I(lt1_h_ocean^8) + I(inland^8) + I(near_bay^8) +
+                I(near_ocean^8)
+)
+
+formulas <- c(f1, f2, f3, f4, f5, f6, f7, f8)
+MAE_train_array <- c(length(formulas))
+MAE_val_array <- c(length(formulas))
+RSQ_train_array <- c(length(formulas))
+RSQ_val_array <- c(length(formulas))
+i <- 1
+for (f in formulas) {
+  model <- lm(formula = f, data=trainData)
+  
+  trainPred <- predict(model, trainData)
+  MAE_train_array[i] <- getMAE(trainPred, trainData$median_house_value)
+  RSQ_train_array[i] <- getRSQ(trainPred, trainData$median_house_value)
+  
+  valPred <- predict(model, valData)
+  MAE_val_array[i] <- getMAE(valPred, valData$median_house_value)
+  RSQ_val_array[i] <- getRSQ(valPred, valData$median_house_value)
+  i <- i+1
+}
+```
+Avalia??o para os modelos **complexos baseado em regress?o polinomial**:
+\
+F?rmula grau 1: MAE = **`r MAE_val_array[1]`** e R? = **`r RSQ_val_array[1]*100`**%\
+F?rmula grau 2: MAE = **`r MAE_val_array[2]`** e R? = **`r RSQ_val_array[2]*100`**%\
+F?rmula grau 3: MAE = **`r MAE_val_array[3]`** e R? = **`r RSQ_val_array[3]*100`**%\
+F?rmula grau 4: MAE = **`r MAE_val_array[4]`** e R? = **`r RSQ_val_array[4]*100`**%\
+F?rmula grau 5: MAE = **`r MAE_val_array[5]`** e R? = **`r RSQ_val_array[5]*100`**%\
+F?rmula grau 6: MAE = **`r MAE_val_array[6]`** e R? = **`r RSQ_val_array[6]*100`**%\
+F?rmula grau 7: MAE = **`r MAE_val_array[7]`** e R? = **`r RSQ_val_array[7]*100`**%\
+F?rmula grau 8: MAE = **`r MAE_val_array[8]`** e R? = **`r RSQ_val_array[8]*100`**%\
+
+\
+```{r echo=FALSE}
+#Plot: MAE do treino e valida??o
+plot(MAE_train_array, type="o", col="blue", 
+     ylim=c(min(min(MAE_train_array), min(MAE_val_array)),
+            max(max(MAE_train_array), max(MAE_val_array))))
+points(MAE_val_array, col="red", pch="*")
+lines(MAE_val_array, col="red",lty=2)
+```
+
+A partir da fun??o de grau 7 percebe-se que os modelos tem um bom desempenho nos dados de treinamento, por?m n?o generaliza, tornando-se muito especializado, o que caracteriza **overfitting**.
+
+## Resultado do melhor modelo no conjunto de teste
+
+O modelo escolhido para uso no conjunto de teste ? o polinomial de grau 6, pois na curva do MAE foi o que apresentou menor diferen?a entre o valor real e o predito durante o treinamento. A escolha da fun??o foi feita de modo a garantir uma converg?ncia entre o treinamento e a valida??o.
+
+\
+```{r echo=FALSE}
+# Regress?o Linear (melhor modelo)
+best_model <- lm(formula = f6, data=trainData)
+
+valPred <- predict(best_model, testData)
+
+# Medidas de Avalia??o para Regress?o
+# MAE
+MAE_best <- getMAE(valPred, testData$median_house_value)
+
+# MSE
+MSE_best <- getMSE(valPred, testData$median_house_value)
+
+# R-squared
+RSQ_best <- getRSQ(valPred, testData$median_house_value)
+```
+Avalia??o para o modelo **polinomial de grau 6**: MAE **`r MAE_best`** e R? **`r RSQ_best*100`**%.
+
